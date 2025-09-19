@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>预算日历</title>
+<style>
+body { 
+  font-family: Arial; 
+  margin: 0; 
+  padding: 20px; 
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  background: #fafafa; 
+}
+h1 { margin-bottom: 20px; text-align: center; }
+
+#toolbar {
+  margin-bottom: 15px;
+  display: flex;
+  gap: 10px;
+  align-items: center;  
+  flex-wrap: wrap;      
+}
+#toolbar button { 
+  padding: 5px 10px; 
+  border-radius: 4px; 
+  border: 1px solid #ccc; 
+  cursor: pointer; 
+  background-color: #f0f0f0; 
+}
+#toolbar input {
+  width: 120px;
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+#calendar { 
+  display: grid; 
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); /* 自动适应格子宽度 */
+  gap: 10px; 
+  justify-content: center; /* 水平居中 */
+  width: 100%;
+  max-width: 900px;
+  padding: 0 10px; 
+}
+
+.day { 
+  border: 1px solid #ddd; 
+  border-radius: 8px; 
+  background: white; 
+  padding: 8px; 
+  display: flex; 
+  flex-direction: column; 
+  align-items: stretch; 
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05); 
+}
+.day strong { 
+  text-align: center; 
+  margin-bottom: 5px; 
+  font-weight: bold; 
+}
+.entries { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 5px; 
+}
+.entry-row { 
+  display: flex; 
+  gap: 5px; 
+  align-items: center; 
+}
+input.entry { 
+  flex: 1; 
+  width: 100%; /* 填满格子 */
+  box-sizing: border-box;
+  text-align: center; 
+  padding: 4px; 
+  border: 1px solid #ccc; 
+  border-radius: 4px; 
+  cursor: pointer; 
+}
+input.selected { 
+  border: 2px solid orange; 
+}
+input.locked { 
+  border: 2px solid #3b82f6; 
+  background-color: #e0f2fe; 
+}
+.delete-btn { 
+  background: #ffdddd; 
+  border: 1px solid #ccc; 
+  cursor: pointer; 
+  font-size: 14px; 
+  padding: 0 5px; 
+  border-radius: 4px; 
+  height: 28px; 
+}
+.add-btn { 
+  background: #f0f0f0; 
+  border: 1px solid #ccc; 
+  cursor: pointer; 
+  margin-top: 5px; 
+  font-size: 14px; 
+  border-radius: 4px; 
+  padding: 2px 4px; 
+}
+
+#summary { 
+  margin-top: 20px; 
+  max-width: 900px; 
+  background: #fff; 
+  padding: 10px; 
+  border-radius: 6px; 
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05); 
+  font-weight: bold; 
+  word-break: break-word; 
+  white-space: pre-line; 
+}
+</style>
+</head>
+<body>
+
+<h1>预算日历</h1>
+
+<div id="toolbar">
+  <button onclick="setCustom()">设为自定义</button>
+  <button onclick="unsetCustom()">取消自定义</button>
+  <button onclick="clearAll()">一键清除</button>
+  <input type="number" id="total" placeholder="输入总金额" oninput="redistribute()">
+</div>
+
+<div id="calendar"></div>
+
+<div id="summary"></div>
+
+<script>
+const today = new Date();
+const year = today.getFullYear();
+const month = today.getMonth();
+const lastDay = new Date(year, month + 1, 0);
+const daysInMonth = lastDay.getDate();
+
+let values = Array.from({ length: daysInMonth }, () => [0]);
+let locked = new Set();
+let selected = new Set();
+
+const calendar = document.getElementById('calendar');
+
+function createDayElement(dayIndex){
+  const div = document.createElement('div');
+  div.className = 'day';
+
+  const entriesDiv = document.createElement('div');
+  entriesDiv.className = 'entries';
+
+  values[dayIndex].forEach((val, idx)=>{
+    const row = document.createElement('div');
+    row.className = 'entry-row';
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.value = val;
+    input.className = 'entry';
+    input.dataset.day = dayIndex;
+    input.dataset.entry = idx;
+    const key = `${dayIndex}-${idx}`;
+    if(locked.has(key)) input.classList.add('locked');
+    if(selected.has(key)) input.classList.add('selected');
+
+    input.addEventListener('click', ()=>toggleSelect(dayIndex, idx, input));
+    input.addEventListener('input', ()=>{
+      values[dayIndex][idx] = parseFloat(input.value) || 0;
+      redistribute();
+      updateSummary();
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'delete-btn';
+    delBtn.textContent = '×';
+    delBtn.addEventListener('click', ()=>deleteEntry(dayIndex, idx));
+
+    row.appendChild(input);
+    row.appendChild(delBtn);
+    entriesDiv.appendChild(row);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'add-btn';
+  addBtn.textContent = '+ 添加';
+  addBtn.addEventListener('click', ()=>addEntry(dayIndex));
+
+  div.innerHTML = `<strong>${dayIndex+1}</strong>`;
+  div.appendChild(entriesDiv);
+  div.appendChild(addBtn);
+  return div;
+}
+
+function renderCalendar(){
+  calendar.innerHTML = '';
+  for(let i=0;i<daysInMonth;i++){
+    calendar.appendChild(createDayElement(i));
+  }
+  updateSummary();
+}
+
+function updateDay(dayIndex){
+  const dayDiv = createDayElement(dayIndex);
+  const oldDiv = calendar.children[dayIndex];
+  calendar.replaceChild(dayDiv, oldDiv);
+  updateSummary();
+}
+
+function addEntry(dayIndex){
+  values[dayIndex].push(0);
+  redistribute();
+  updateDay(dayIndex);
+}
+
+function deleteEntry(dayIndex, entryIndex){
+  if(values[dayIndex].length>1){
+    values[dayIndex].splice(entryIndex,1);
+  } else { values[dayIndex][0]=0; }
+  locked.delete(`${dayIndex}-${entryIndex}`);
+  selected.delete(`${dayIndex}-${entryIndex}`);
+  redistribute();
+  updateDay(dayIndex);
+}
+
+function toggleSelect(dayIndex, entryIndex, input){
+  const key = `${dayIndex}-${entryIndex}`;
+  if(selected.has(key)){
+    selected.delete(key);
+    input.classList.remove('selected');
+  } else {
+    selected.add(key);
+    input.classList.add('selected');
+  }
+}
+
+function setCustom(){
+  selected.forEach(key => locked.add(key));
+  selected.clear();
+  redistribute();
+  renderCalendar();
+}
+
+function unsetCustom(){
+  selected.forEach(key => locked.delete(key));
+  selected.clear();
+  redistribute();
+  renderCalendar();
+}
+
+function clearAll(){
+  values = Array.from({ length: daysInMonth }, () => [0]);
+  locked.clear();
+  selected.clear();
+  document.getElementById('total').value = '';
+  renderCalendar();
+}
+
+function redistribute(){
+  const total = parseFloat(document.getElementById('total').value)||0;
+
+  let lockedTotal = 0;
+  locked.forEach(key=>{
+    const [d,e] = key.split('-').map(Number);
+    lockedTotal += values[d][e] || 0;
+  });
+
+  const adjustable = [];
+  values.forEach((arr,d)=>{
+    arr.forEach((v,e)=>{
+      const key = `${d}-${e}`;
+      if(!locked.has(key)) adjustable.push([d,e]);
+    });
+  });
+
+  const remaining = total - lockedTotal;
+  const per = adjustable.length>0 ? remaining / adjustable.length : 0;
+  adjustable.forEach(([d,e]) => values[d][e] = parseFloat(per.toFixed(2)));
+
+  renderCalendar();
+}
+
+function updateSummary(){
+  const total = parseFloat(document.getElementById('total').value) || 0;
+
+  let customAmounts = [];
+  let customSum = 0;
+  locked.forEach(key=>{
+    const [d,e]=key.split('-').map(Number);
+    const val = values[d][e] || 0;
+    customAmounts.push(val);
+    customSum += val;
+  });
+
+  let adjustableCount = 0;
+  values.forEach((arr,d)=>{
+    arr.forEach((v,e)=>{
+      const key = `${d}-${e}`;
+      if(!locked.has(key)) adjustableCount++;
+    });
+  });
+
+  const average = adjustableCount>0 ? (total - customSum)/adjustableCount : 0;
+
+  let formula = '';
+  if(adjustableCount>0){
+    formula += `平均部分：${average.toFixed(2)} × ${adjustableCount} = ${(average*adjustableCount).toFixed(2)}\n`;
+  }
+  if(customAmounts.length>0){
+    formula += `自定义部分: ${customAmounts.map(v=>v.toFixed(2)).join(' + ')} = ${customSum.toFixed(2)}\n`;
+  }
+  formula += `总计 = ${total.toFixed(2)}`;
+
+  document.getElementById('summary').textContent = formula;
+}
+
+// 初始化
+renderCalendar();
+</script>
+
+</body>
+</html>
